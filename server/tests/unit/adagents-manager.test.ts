@@ -134,6 +134,8 @@ describe('AdAgentsManager', () => {
       const result = await manager.validateDomain('publisher.example');
       expect(result.valid).toBe(true);
       expect(result.warnings.some(w => w.field === 'managerdomain')).toBe(true);
+      expect(result.discovery_method).toBe('ads_txt_managerdomain');
+      expect(result.manager_domain).toBe('manager.example');
       expect(result.domain).toBe('publisher.example');
       expect(result.url).toBe('https://publisher.example/.well-known/adagents.json');
     });
@@ -219,6 +221,7 @@ describe('AdAgentsManager', () => {
       const result = await manager.validateDomain('publisher.example');
       expect(result.valid).toBe(true);
       expect(result.warnings.some(w => w.field === 'managerdomain')).toBe(true);
+      expect(result.discovery_method).toBe('ads_txt_managerdomain');
     });
 
     it('ignores comment-only managerdomain lines', async () => {
@@ -856,6 +859,7 @@ describe('AdAgentsManager', () => {
       expect(callCount).toBe(2); // Two requests: initial + authoritative
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
+      expect(result.discovery_method).toBe('authoritative_location');
     });
 
     it('rejects non-HTTPS authoritative locations', async () => {

@@ -22,6 +22,8 @@ export interface AdAgentsValidationResult {
   url: string;
   status_code?: number;
   raw_data?: any;
+  discovery_method?: 'direct' | 'authoritative_location' | 'ads_txt_managerdomain';
+  manager_domain?: string;
 }
 
 export interface AuthorizedAgent {
@@ -152,6 +154,7 @@ export interface CreateAdAgentsJsonOptions {
 }
 
 export class AdAgentsManager {
+  private adsTxtCache = new Map<string, { managers: string[]; expiresAt: number }>();
 
   /**
    * Validates a domain's adagents.json file
@@ -174,7 +177,8 @@ export class AdAgentsManager {
       errors: [],
       warnings: [],
       domain: normalizedDomain,
-      url
+      url,
+      discovery_method: 'direct',
     };
 
     try {
@@ -204,19 +208,19 @@ export class AdAgentsManager {
           const isHopAllowed = managerFallbackDepth < 1;
           if (managerDomains.length > 0 && isHopAllowed) {
             const managerDomain = managerDomains[managerDomains.length - 1];
-            const isCycle = visitedDomains.has(managerDomain);
+            const currentVisited = new Set(visitedDomains);
+            currentVisited.add(normalizedDomain);
+            const isCycle = currentVisited.has(managerDomain);
             if (isCycle) {
               result.warnings.push({
                 field: 'managerdomain',
                 message: `Ignoring ads.txt managerdomain ${managerDomain} due to cycle detection`,
               });
             } else {
-              const nextVisited = new Set(visitedDomains);
-              nextVisited.add(normalizedDomain);
               const managerResult = await this.validateDomainInternal(
                 managerDomain,
                 managerFallbackDepth + 1,
-                nextVisited
+                currentVisited
               );
               if (managerResult.valid) {
                 return {
@@ -230,6 +234,8 @@ export class AdAgentsManager {
                       message: `No adagents.json at ${url}; used ads.txt managerdomain ${managerDomain}`,
                     },
                   ],
+                  discovery_method: 'ads_txt_managerdomain',
+                  manager_domain: managerDomain,
                 };
               }
             }
@@ -279,6 +285,7 @@ export class AdAgentsManager {
 
         if (authoritativeData) {
           adagentsData = authoritativeData;
+          result.discovery_method = 'authoritative_location';
         } else {
           // Error already added to result by fetchAuthoritativeFile
           return result;
@@ -300,6 +307,9 @@ export class AdAgentsManager {
   }
 
   private async tryResolveManagerDomains(domain: string): Promise<string[]> {
+    const cached = this.adsTxtCache.get(domain);
+    if (cached && cached.expiresAt > Date.now()) return cached.managers;
+
     const adsTxtUrl = `https://${domain}/ads.txt`;
     try {
       const response = await safeFetchAxiosLike(adsTxtUrl, {
@@ -309,9 +319,15 @@ export class AdAgentsManager {
           'User-Agent': AAO_UA_VALIDATOR,
         },
       });
-      if (response.status !== 200) return [];
-      return this.parseManagerDomains(response.data.toString('utf-8'));
+      if (response.status !== 200) {
+        this.adsTxtCache.set(domain, { managers: [], expiresAt: Date.now() + 60 * 60 * 1000 });
+        return [];
+      }
+      const managers = this.parseManagerDomains(response.data.toString('utf-8'));
+      this.adsTxtCache.set(domain, { managers, expiresAt: Date.now() + 4 * 60 * 60 * 1000 });
+      return managers;
     } catch {
+      this.adsTxtCache.set(domain, { managers: [], expiresAt: Date.now() + 60 * 60 * 1000 });
       return [];
     }
   }

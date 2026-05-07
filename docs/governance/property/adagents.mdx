@@ -231,6 +231,11 @@ When `https://{publisher}/.well-known/adagents.json` returns `404`, validators M
 2. If one or more eligible managerdomain entries remain, use the **last** eligible entry in file order and attempt `https://{managerdomain}/.well-known/adagents.json`.
 3. If that manager file validates, treat it as the discovered authorization source for this lookup.
 
+Implementations that expose validator results SHOULD provide structured provenance metadata (rather than only warning text), e.g.:
+
+- `discovery_method: "direct" | "authoritative_location" | "ads_txt_managerdomain"`
+- `manager_domain` when `discovery_method === "ads_txt_managerdomain"`
+
 ### Safety rules for this fallback
 
 - **One hop only**: maximum depth is exactly one (`publisher -> managerdomain`). Do not chain managerdomain lookups.

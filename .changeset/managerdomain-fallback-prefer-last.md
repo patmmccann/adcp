@@ -11,6 +11,10 @@ Refine ads.txt managerdomain compatibility fallback semantics:
   - cycle detection for manager lookups
   - `#noagents` trailing-token opt-out on managerdomain directive lines
   - no fallback on non-404 responses
+  - per-host ads.txt caching (4h on successful fetch/parse, 1h on miss/error backoff)
+- expose structured provenance on validation results:
+  - `discovery_method: 'direct' | 'authoritative_location' | 'ads_txt_managerdomain'`
+  - `manager_domain` on ads.txt managerdomain-discovered paths
 - normalize directive semantics:
   - support only explicit `MANAGERDOMAIN=` directive lines (case-insensitive key)
   - ignore comment-only `# managerdomain=...` lines
