@@ -111,4 +111,19 @@ test('RULE_MESSAGES.kit_shape_unclassified points authors at the schema docs', (
   assert.match(msg, /auth\.api_key/);
   assert.match(msg, /applies_to/);
   assert.match(msg, /storyboard-schema\.yaml/);
+  assert.match(msg, /Test kit flavors/);
+});
+
+test('storyboard schema docs describe both test-kit flavor markers', () => {
+  // Keep the lint guidance anchored to real docs. If the schema prose drops
+  // either marker, the lint message's doc pointer becomes stale and authors
+  // lose the exact source-of-truth for this partition.
+  const schema = fs.readFileSync(
+    path.join(__dirname, '../static/compliance/source/universal/storyboard-schema.yaml'),
+    'utf8',
+  );
+
+  assert.match(schema, /Test kit flavors/i);
+  assert.match(schema, /auth\.api_key/);
+  assert.match(schema, /applies_to/);
 });
