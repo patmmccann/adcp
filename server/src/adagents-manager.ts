@@ -157,6 +157,14 @@ export class AdAgentsManager {
    * Validates a domain's adagents.json file
    */
   async validateDomain(domain: string): Promise<AdAgentsValidationResult> {
+    return this.validateDomainInternal(domain, 0, new Set<string>());
+  }
+
+  private async validateDomainInternal(
+    domain: string,
+    managerFallbackDepth: number,
+    visitedDomains: Set<string>
+  ): Promise<AdAgentsValidationResult> {
     // Normalize domain - remove protocol and trailing slash
     const normalizedDomain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
     const url = `https://${normalizedDomain}/.well-known/adagents.json`;
@@ -188,6 +196,50 @@ export class AdAgentsManager {
 
       // Check HTTP status
       if (response.status !== 200) {
+        // Fallback for publisher-manager patterns: if the publisher does not
+        // serve /.well-known/adagents.json but does serve ads.txt with a
+        // managerdomain declaration, attempt discovery on the manager domain.
+        if (response.status === 404) {
+          const managerDomains = await this.tryResolveManagerDomains(normalizedDomain);
+          const isHopAllowed = managerFallbackDepth < 1;
+          if (managerDomains.length > 0 && isHopAllowed) {
+            const managerDomain = managerDomains[managerDomains.length - 1];
+            const isCycle = visitedDomains.has(managerDomain);
+            if (isCycle) {
+              result.warnings.push({
+                field: 'managerdomain',
+                message: `Ignoring ads.txt managerdomain ${managerDomain} due to cycle detection`,
+              });
+            } else {
+              const nextVisited = new Set(visitedDomains);
+              nextVisited.add(normalizedDomain);
+              const managerResult = await this.validateDomainInternal(
+                managerDomain,
+                managerFallbackDepth + 1,
+                nextVisited
+              );
+              if (managerResult.valid) {
+                return {
+                  ...managerResult,
+                  domain: normalizedDomain,
+                  url,
+                  warnings: [
+                    ...managerResult.warnings,
+                    {
+                      field: 'managerdomain',
+                      message: `No adagents.json at ${url}; used ads.txt managerdomain ${managerDomain}`,
+                    },
+                  ],
+                };
+              }
+            }
+          } else if (managerDomains.length > 0 && !isHopAllowed) {
+            result.warnings.push({
+              field: 'managerdomain',
+              message: `Ignoring ads.txt managerdomain entries: max fallback depth reached`,
+            });
+          }
+        }
         const statusMessage = response.status === 404
           ? `File not found at ${url}`
           : `HTTP ${response.status} error fetching ${url}`;
@@ -245,6 +297,40 @@ export class AdAgentsManager {
     }
 
     return result;
+  }
+
+  private async tryResolveManagerDomains(domain: string): Promise<string[]> {
+    const adsTxtUrl = `https://${domain}/ads.txt`;
+    try {
+      const response = await safeFetchAxiosLike(adsTxtUrl, {
+        timeoutMs: 10000,
+        headers: {
+          'Accept': 'text/plain',
+          'User-Agent': AAO_UA_VALIDATOR,
+        },
+      });
+      if (response.status !== 200) return [];
+      return this.parseManagerDomains(response.data.toString('utf-8'));
+    } catch {
+      return [];
+    }
+  }
+
+  private parseManagerDomains(adsTxtContent: string): string[] {
+    const managers: string[] = [];
+    const lines = adsTxtContent.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^managerdomain\s*=\s*([A-Za-z0-9.-]+)(?:\s+#\s*(.*))?$/i);
+      if (match?.[1]) {
+        const trailingComment = (match[2] || '').toLowerCase();
+        if (/\bnoagents\b/.test(trailingComment)) {
+          continue;
+        }
+        managers.push(match[1].toLowerCase());
+      }
+    }
+    return managers;
   }
 
   /**
